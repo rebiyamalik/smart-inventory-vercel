@@ -1,3 +1,4 @@
 
 [tool.vercel]
-entrypoint = "api/analyze.py"
+entrypoint = "api.analyze:handler"
+
