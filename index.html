@@ -1,0 +1,152 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smart Inventory Analyst</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f4f6fb;color:#18223b;font:15px/1.5 Arial,sans-serif}
+header{padding:35px 6%;background:linear-gradient(120deg,#172554,#3659db);color:white}
+header h1{font-size:clamp(28px,4vw,42px);margin:8px 0}
+header p{color:#e0e7ff;max-width:650px}
+main{max-width:1100px;margin:25px auto;padding:0 18px}
+.card,.kpi{background:white;border:1px solid #e3e8f1;border-radius:16px;padding:20px;margin-bottom:17px}
+.controls,.kpis,.charts{display:grid;gap:14px}
+.controls{grid-template-columns:2fr 1fr 1fr}
+.kpis{grid-template-columns:repeat(4,1fr)}
+.charts{grid-template-columns:1fr 1fr}
+label{display:block;font-weight:bold;font-size:13px;margin-bottom:7px}
+input{max-width:100%;width:100%;padding:11px;border:1px solid #cbd3e2;border-radius:9px}
+button{border:0;background:#3157d5;color:white;border-radius:9px;padding:12px 16px;font-weight:bold;cursor:pointer}
+button:disabled{opacity:.5}
+.secondary{background:#eaf0ff;color:#2849b9}
+.actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:15px}
+.kpi span{color:#667085;font-size:12px}.kpi strong{display:block;font-size:24px;margin-top:5px;overflow-wrap:anywhere}
+.muted{color:#667085;font-size:12px}
+.bars{display:grid;gap:10px}.bar{display:grid;grid-template-columns:90px 1fr 75px;gap:8px;align-items:center;font-size:12px}
+.track{height:10px;border-radius:10px;background:#e9edf6;overflow:hidden}.fill{height:100%;background:#4361ee}
+.barname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.barvalue{text-align:right}
+.tablewrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:600px;font-size:13px}
+td,th{padding:10px;border-bottom:1px solid #e7ebf2;text-align:left;white-space:nowrap}
+th{background:#f6f8fc;font-size:11px;text-transform:uppercase}
+.pill{border-radius:20px;padding:3px 8px;font-size:11px;font-weight:bold}
+.low{background:#fee4e2;color:#b42318}.ok{background:#dcfae6;color:#137a52}
+#status,#ai{white-space:pre-wrap}.empty{padding:20px;color:#667085}
+@media(max-width:720px){.controls,.charts{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<header>
+ <div class="muted" style="color:#c7d2fe;letter-spacing:2px">BUSINESS INTELLIGENCE</div>
+ <h1>Smart Inventory &amp; Sales Analyst</h1>
+ <p>Analyze revenue, profitability and stock risks with a simple, AI-assisted business dashboard.</p>
+</header>
+<main>
+<section class="card">
+ <h2>Analyze your data</h2>
+ <div class="controls">
+  <div><label>CSV or Excel file</label><input type="file" id="file" accept=".csv,.xlsx,.xls"><p class="muted">Required: Product, Units_Sold, Stock, Unit_Price, Unit_Cost</p></div>
+  <div><label>Low-stock threshold</label><input id="threshold" type="number" value="25" min="0"></div>
+  <div><label>Safety-stock days</label><input id="safety" type="number" value="7" min="0"></div>
+ </div>
+ <div class="actions">
+  <button id="run">Analyze sample data</button>
+  <button id="download" class="secondary" disabled>Download Excel report</button>
+ </div>
+ <p id="status" class="muted">Ready to analyze.</p>
+</section>
+<section class="kpis">
+ <div class="kpi"><span>Total revenue</span><strong id="rev">—</strong></div>
+ <div class="kpi"><span>Gross profit</span><strong id="profit">—</strong></div>
+ <div class="kpi"><span>Gross margin</span><strong id="margin">—</strong></div>
+ <div class="kpi"><span>Low-stock products</span><strong id="low">—</strong></div>
+</section>
+<section class="charts">
+ <div class="card"><h3>Revenue by product</h3><div id="revenueChart" class="bars empty">Run analysis to view chart.</div></div>
+ <div class="card"><h3>Stock by product</h3><div id="stockChart" class="bars empty">Run analysis to view chart.</div></div>
+</section>
+<section class="card">
+ <h2>Product summary</h2>
+ <div id="table" class="tablewrap"><p class="empty">No analysis yet.</p></div>
+</section>
+<section class="card">
+ <h2>Gemini recommendations</h2>
+ <div id="ai">Add GEMINI_API_KEY to your Vercel project environment variables to enable AI insights.</div>
+</section>
+<p class="muted">Reorder estimates are indicative only. Verify stock, sales periods and supplier lead times before making purchasing decisions.</p>
+</main>
+<script>
+const sample=[
+ {Product:"Chips",Units_Sold:120,Stock:25,Unit_Price:100,Unit_Cost:70,Lead_Time_Days:5},
+ {Product:"Biscuits",Units_Sold:85,Stock:80,Unit_Price:60,Unit_Cost:40,Lead_Time_Days:4},
+ {Product:"Juice",Units_Sold:140,Stock:18,Unit_Price:120,Unit_Cost:85,Lead_Time_Days:7},
+ {Product:"Noodles",Units_Sold:95,Stock:50,Unit_Price:80,Unit_Cost:55,Lead_Time_Days:3},
+ {Product:"Chocolate",Units_Sold:60,Stock:12,Unit_Price:150,Unit_Cost:100,Lead_Time_Days:6}
+];
+let rows=sample,latest=null;
+const $=id=>document.getElementById(id);
+const fmt=n=>new Intl.NumberFormat("en-US",{maximumFractionDigits:2}).format(n||0);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const aliases={product:"Product",units_sold:"Units_Sold",quantity_sold:"Units_Sold",stock:"Stock",current_stock:"Stock",unit_price:"Unit_Price",selling_price:"Unit_Price",unit_cost:"Unit_Cost",cost_price:"Unit_Cost",lead_time_days:"Lead_Time_Days",lead_time:"Lead_Time_Days",reorder_level:"Reorder_Level",date:"Date"};
+function normalize(data){return data.map(row=>{let o={};for(const [k,v] of Object.entries(row)){const key=String(k).trim().toLowerCase().replace(/[ -]+/g,"_");o[aliases[key]||k]=v}return o})}
+$("file").addEventListener("change",async e=>{
+ const file=e.target.files[0];if(!file)return;
+ try{
+  const buf=await file.arrayBuffer();
+  if(file.name.toLowerCase().endsWith(".csv")){
+   const text=new TextDecoder().decode(buf);
+   const lines=text.split(/\r?\n/).filter(x=>x.trim());
+   const parse=s=>{let a=[],v="",q=false;for(let i=0;i<s.length;i++){let c=s[i];if(c==='"'&&q&&s[i+1]==='"'){v+='"';i++}else if(c==='"')q=!q;else if(c===","&&!q){a.push(v);v=""}else v+=c}a.push(v);return a};
+   const head=parse(lines.shift());rows=normalize(lines.map(l=>Object.fromEntries(parse(l).map((v,i)=>[head[i],v]))));
+  }else{
+   const wb=XLSX.read(buf,{type:"array"});
+   rows=normalize(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]));
+  }
+  $("status").textContent=`Loaded ${rows.length} rows. Click Analyze data.`;
+  $("run").textContent="Analyze uploaded data";
+ }catch(err){$("status").textContent="Could not read file: "+err.message}
+});
+function bars(id,items,key){
+ const max=Math.max(1,...items.map(p=>Number(p[key])||0));
+ $(id).className="bars";
+ $(id).innerHTML=items.slice().sort((a,b)=>b[key]-a[key]).slice(0,8).map(p=>
+ `<div class="bar"><div class="barname" title="${esc(p.Product)}">${esc(p.Product)}</div><div class="track"><div class="fill" style="width:${Math.max(0,Number(p[key])||0)/max*100}%"></div></div><div class="barvalue">${fmt(p[key])}</div></div>`
+ ).join("")||"No data";
+}
+async function analyze(){
+ $("run").disabled=true;$("download").disabled=true;$("status").textContent="Analyzing…";
+ try{
+  const response=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows,threshold:Number($("threshold").value)||0,safety_days:Number($("safety").value)||0})});
+  const data=await response.json();if(!response.ok)throw Error(data.error||"Request failed");
+  latest=data;
+  $("rev").textContent=fmt(data.summary.total_revenue);
+  $("profit").textContent=fmt(data.summary.gross_profit);
+  $("margin").textContent=data.summary.gross_margin+"%";
+  $("low").textContent=data.summary.low_stock_count;
+  bars("revenueChart",data.products,"Revenue");
+  bars("stockChart",data.products,"Stock");
+  const cols=["Product","Units_Sold","Stock","Revenue","Gross_Profit","Profit_Margin_%","Reorder_Point_Estimate","Stock_Status"];
+  $("table").innerHTML=`<table><thead><tr>${cols.map(c=>`<th>${c.replaceAll("_"," ")}</th>`).join("")}</tr></thead><tbody>${data.products.map(p=>`<tr>${cols.map(c=>c==="Stock_Status"?`<td><span class="pill ${p[c]==="LOW STOCK"?"low":"ok"}">${esc(p[c])}</span></td>`:`<td>${typeof p[c]==="number"?fmt(p[c]):esc(p[c]??"")}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  $("ai").textContent=data.recommendations||"Numerical analysis completed. Gemini key is not configured, so AI recommendations are disabled.";
+  $("status").textContent=`Analysis complete: ${data.summary.row_count} rows and ${data.summary.product_count} products.`;
+  $("download").disabled=false;
+ }catch(err){$("status").textContent="Error: "+err.message}
+ finally{$("run").disabled=false}
+}
+$("run").onclick=analyze;
+$("download").onclick=()=>{
+ if(!latest)return;
+ const wb=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet([latest.summary]),"Overview");
+ XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(latest.products),"Product Summary");
+ XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(latest.detail),"Detailed Analysis");
+ XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(latest.low_stock),"Low Stock Alerts");
+ XLSX.writeFile(wb,"smart_inventory_analysis.xlsx");
+};
+analyze();
+</script>
+</body>
+</html>
